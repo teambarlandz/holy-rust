@@ -160,6 +160,9 @@ fn error_text(err: crate::compiler::parser::ParseError) -> &'static [u8] {
         DivByZero => b"DIV BY ZERO\n",
         MissingSemicolon => b"MISSING SEMICOLON\n",
         EmptyLine => b"\n",
+        CapabilityViolation => {
+            b"E001: CAPABILITY_VIOLATION - Peripheral token not claimed\n"
+        }
     }
 }
 
@@ -187,14 +190,54 @@ fn execute(outcome: Outcome) {
         },
         Outcome::Claim(name) => do_claim(&name),
         Outcome::Drop(name) => do_drop(&name),
+        Outcome::EnforcedPoke { addr, val } => {
+            match memory::enforced_poke_u32(addr, val) {
+                Ok(()) => uart::write_line(b"OK"),
+                Err(e) => {
+                    uart::write_str(e.as_bytes());
+                    uart::write_str(b"\n");
+                }
+            }
+        }
+        Outcome::EnforcedPeek { addr } => {
+            match memory::enforced_peek_u32(addr) {
+                Ok(value) => {
+                    uart::write_str(b"= ");
+                    write_value(value);
+                }
+                Err(e) => {
+                    uart::write_str(e.as_bytes());
+                    uart::write_str(b"\n");
+                }
+            }
+        }
         Outcome::SetBit { addr, bit } => {
-            memory::reg_set_bit(addr as usize, bit as u8);
-            uart::write_line(b"OK");
+            // Capability enforcement for reg_set_bit (doc ch.2).
+            match memory::enforced_poke_u32(
+                addr,
+                memory::peek_u32(addr as usize) | (1u32 << bit),
+            ) {
+                Ok(()) => uart::write_line(b"OK"),
+                Err(e) => {
+                    uart::write_str(e.as_bytes());
+                    uart::write_str(b"\n");
+                }
+            }
         }
         Outcome::ClrBit { addr, bit } => {
-            memory::reg_clr_bit(addr as usize, bit as u8);
-            uart::write_line(b"OK");
+            // Capability enforcement for reg_clr_bit (doc ch.2).
+            match memory::enforced_poke_u32(
+                addr,
+                memory::peek_u32(addr as usize) & !(1u32 << bit),
+            ) {
+                Ok(()) => uart::write_line(b"OK"),
+                Err(e) => {
+                    uart::write_str(e.as_bytes());
+                    uart::write_str(b"\n");
+                }
+            }
         }
+        Outcome::SysAudit => handle_audit(),
     }
 }
 
@@ -245,18 +288,43 @@ fn do_drop(name: &NameBuf) {
     }
 }
 
+fn handle_audit() {
+    unsafe {
+        use crate::capabilities::audit::SUPERUSER_AUDIT_LOG;
+        let log = core::ptr::addr_of_mut!(SUPERUSER_AUDIT_LOG);
+        let count = (*log).total_audits();
+        uart::write_str(b"--- SUPERUSER AUDIT LOG ---\r\n");
+        uart::write_str(b"Total Unsafe Operations: ");
+        uart::write_dec_u32(count as u32);
+        uart::write_str(b"\r\nRecent Events:\r\n");
+
+        for entry in (*log).entries().iter() {
+            if entry.addr != 0 {
+                uart::write_str(b"ADDR: ");
+                uart::write_hex_u32(entry.addr);
+                uart::write_str(b" | VAL: ");
+                uart::write_hex_u32(entry.val);
+                uart::write_str(b" | CYCLES: ");
+                uart::write_dec_u32(entry.timestamp_cycles);
+                uart::write_str(b"\r\n");
+            }
+        }
+    }
+}
+
 fn print_help() {
     uart::write_line(
         b"commands:\r\n\
-          peek ADDR;              read u32 from address\r\n\
-          poke ADDR VAL;          write u32 to address\r\n\
-          reg_set_bit ADDR BIT;   set register bit\r\n\
-          reg_clr_bit ADDR BIT;   clear register bit\r\n\
+          peek ADDR;              read u32 from address (requires capability)\r\n\
+          poke ADDR VAL;          write u32 to address (requires capability)\r\n\
+          reg_set_bit ADDR BIT;   set register bit (requires capability)\r\n\
+          reg_clr_bit ADDR BIT;   clear register bit (requires capability)\r\n\
           cap_claim NAME;         claim peripheral (GPIOA GPIOB UART0 SPI0 I2C0 TIMER0 DMA0 SUPERUSER)\r\n\
           cap_drop NAME;          release peripheral\r\n\
           let NAME = EXPR;        bind constant\r\n\
           fn NAME() { ... }       define callable body\r\n\
           EXPR;                   evaluate (+ - * / % left-to-right)\r\n\
+          sys_audit               dump SuperUser audit log\r\n\
           banner                  reprint banner",
     );
 }

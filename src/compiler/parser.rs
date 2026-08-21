@@ -73,6 +73,8 @@ pub enum ParseError {
     DivByZero,
     MissingSemicolon,
     EmptyLine,
+    /// Mandatory capability enforcement: peripheral access denied (doc ch.2).
+    CapabilityViolation,
 }
 
 /// A compiled threaded token stream ready for SRAM dispatch.
@@ -150,6 +152,12 @@ pub enum Outcome {
     Help,
     /// `banner`
     Banner,
+    /// `sys_audit` — dump the SuperUser audit log.
+    SysAudit,
+    /// Capability-enforced poke (direct, not via stream).
+    EnforcedPoke { addr: u32, val: u32 },
+    /// Capability-enforced peek (direct, not via stream).
+    EnforcedPeek { addr: u32 },
 }
 
 struct Symbol {
@@ -289,6 +297,9 @@ impl Compiler {
                     let addr = self.eval_expr(None, cur)?;
                     let val = self.eval_expr(None, cur)?;
                     self.expect_semicolon(cur)?;
+                    // Definition-time capability enforcement (doc ch.2 Q3).
+                    crate::capabilities::registry::check_access(addr)
+                        .map_err(|_| ParseError::CapabilityViolation)?;
                     self.stream_push_lit(addr)?;
                     self.stream_push_lit(val)?;
                     self.stream_push(word_of(primitives::write_reg_prim))?;
@@ -297,6 +308,9 @@ impl Compiler {
                 b"peek" => {
                     let addr = self.eval_expr(None, cur)?;
                     self.expect_semicolon(cur)?;
+                    // Definition-time capability enforcement (doc ch.2 Q3).
+                    crate::capabilities::registry::check_access(addr)
+                        .map_err(|_| ParseError::CapabilityViolation)?;
                     self.stream_push_lit(addr)?;
                     self.stream_push(word_of(primitives::load_reg_prim))?;
                     // Body peeks leave their value on the VM stack; the
@@ -330,13 +344,19 @@ impl Compiler {
             b"peek" => {
                 let addr = self.eval_expr(None, cur)?;
                 self.expect_semicolon(cur)?;
-                Ok(Outcome::Run(self.build_peek_program(addr)?))
+                // Mandatory capability enforcement (doc ch.2).
+                crate::capabilities::registry::check_access(addr)
+                    .map_err(|_| ParseError::CapabilityViolation)?;
+                Ok(Outcome::EnforcedPeek { addr })
             }
             b"poke" => {
                 let addr = self.eval_expr(None, cur)?;
                 let val = self.eval_expr(None, cur)?;
                 self.expect_semicolon(cur)?;
-                Ok(Outcome::Run(self.build_poke_program(addr, val)?))
+                // Mandatory capability enforcement (doc ch.2).
+                crate::capabilities::registry::check_access(addr)
+                    .map_err(|_| ParseError::CapabilityViolation)?;
+                Ok(Outcome::EnforcedPoke { addr, val })
             }
             b"cap_claim" => {
                 let name = self.expect_name(cur)?;
@@ -352,12 +372,18 @@ impl Compiler {
                 let addr = self.eval_expr(None, cur)?;
                 let bit = self.eval_expr(None, cur)?;
                 self.expect_semicolon(cur)?;
+                // Mandatory capability enforcement (doc ch.2).
+                crate::capabilities::registry::check_access(addr)
+                    .map_err(|_| ParseError::CapabilityViolation)?;
                 Ok(Outcome::SetBit { addr, bit })
             }
             b"reg_clr_bit" => {
                 let addr = self.eval_expr(None, cur)?;
                 let bit = self.eval_expr(None, cur)?;
                 self.expect_semicolon(cur)?;
+                // Mandatory capability enforcement (doc ch.2).
+                crate::capabilities::registry::check_access(addr)
+                    .map_err(|_| ParseError::CapabilityViolation)?;
                 Ok(Outcome::ClrBit { addr, bit })
             }
             b"help" => {
@@ -367,6 +393,10 @@ impl Compiler {
             b"banner" => {
                 self.allow_optional_semicolon(cur);
                 Ok(Outcome::Banner)
+            }
+            b"sys_audit" => {
+                self.allow_optional_semicolon(cur);
+                Ok(Outcome::SysAudit)
             }
             other => {
                 if matches!(cur.peek(), Token::LParen) {
@@ -482,23 +512,6 @@ impl Compiler {
             len: self.stream_len,
             yields_value,
         }
-    }
-
-    fn build_peek_program(&mut self, addr: u32) -> Result<StreamProgram, ParseError> {
-        self.stream_reset();
-        self.stream_push_lit(addr)?;
-        self.stream_push(word_of(primitives::load_reg_prim))?;
-        self.stream_halt()?;
-        Ok(self.take_program(true))
-    }
-
-    fn build_poke_program(&mut self, addr: u32, val: u32) -> Result<StreamProgram, ParseError> {
-        self.stream_reset();
-        self.stream_push_lit(addr)?;
-        self.stream_push_lit(val)?;
-        self.stream_push(word_of(primitives::write_reg_prim))?;
-        self.stream_halt()?;
-        Ok(self.take_program(false))
     }
 
     fn build_value_program(&mut self, value: u32) -> Result<StreamProgram, ParseError> {

@@ -3,6 +3,42 @@
 //! These are the kernel-side `peek`/`poke` family used by the REPL and by
 //! boot code. All accesses are volatile so they are never elided or
 //! reordered by the optimizer — MMIO semantics.
+//!
+//! The `enforced_*` variants gate every MMIO access through the O(1)
+//! capability registry (doc ch.2).  SRAM / flash addresses return `None`
+//! from `addr_to_cap_id` and pass through without a capability check.
+//! SuperUserCap bypasses all peripheral checks but every write is logged
+//! to the audit ring buffer.
+
+use crate::capabilities::registry;
+
+/// Error returned by enforced memory operations when a capability
+/// violation is detected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemError {
+    /// Peripheral token not claimed (E001).
+    CapabilityViolation,
+    /// Unmapped MMIO access without SuperUserCap (E002).
+    PermissionDenied,
+}
+
+impl MemError {
+    /// Human-readable error prefix for UART output.
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match self {
+            MemError::CapabilityViolation => {
+                b"E001: CAPABILITY_VIOLATION - Peripheral token not claimed"
+            }
+            MemError::PermissionDenied => {
+                b"E002: PERMISSION_DENIED - Unmapped MMIO access requires SuperUserCap"
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Raw (unchecked) access — used by boot code and the UART driver.
+// ---------------------------------------------------------------------------
 
 /// Read a 32-bit value from a physical address (1-3 cycles).
 #[inline(always)]
@@ -34,6 +70,53 @@ pub fn reg_set_bit(addr: usize, bit: u8) {
 pub fn reg_clr_bit(addr: usize, bit: u8) {
     let updated = peek_u32(addr) & !(1u32 << bit);
     poke_u32(addr, updated);
+}
+
+// ---------------------------------------------------------------------------
+// Capability-enforced access (doc ch.2 mandatory enforcement)
+// ---------------------------------------------------------------------------
+
+/// Capability-guarded poke: checks the address against the SRAM
+/// capability registry before performing the write.
+///
+/// - Peripheral addresses require the matching capability to be claimed.
+/// - SRAM / flash / unmapped addresses pass through freely.
+/// - SuperUserCap bypasses all checks but logs to the audit ring.
+#[inline(always)]
+pub fn enforced_poke_u32(addr: u32, value: u32) -> Result<(), MemError> {
+    if registry::is_superuser_active() {
+        // SuperUser bypass: write anything, but record in the audit log.
+        // SAFETY: single-threaded REPL path; audit log is not reentrant.
+        unsafe {
+            (*core::ptr::addr_of_mut!(crate::capabilities::audit::SUPERUSER_AUDIT_LOG))
+                .record_event(addr, value);
+        }
+    } else if let Some(cap_id) = registry::addr_to_cap_id(addr) {
+        // Peripheral address — require the matching capability.
+        if !registry::is_claimed(cap_id as usize) {
+            return Err(MemError::CapabilityViolation);
+        }
+    }
+    // None → SRAM / unmapped → unrestricted.
+    // SAFETY: capability verified above; volatile write to Ring 0 address.
+    unsafe { core::ptr::write_volatile(addr as *mut u32, value) };
+    Ok(())
+}
+
+/// Capability-guarded peek: checks the address against the SRAM
+/// capability registry before performing the read.
+#[inline(always)]
+pub fn enforced_peek_u32(addr: u32) -> Result<u32, MemError> {
+    if registry::is_superuser_active() {
+        // SuperUser bypass: read is allowed (reads are side-effect-free
+        // from a safety perspective; only writes need audit logging).
+    } else if let Some(cap_id) = registry::addr_to_cap_id(addr) {
+        if !registry::is_claimed(cap_id as usize) {
+            return Err(MemError::CapabilityViolation);
+        }
+    }
+    // SAFETY: capability verified above; volatile read from Ring 0 address.
+    Ok(unsafe { core::ptr::read_volatile(addr as *const u32) })
 }
 
 /// Boot-time initialization: copy `.data` from its flash load address

@@ -146,3 +146,60 @@ pub unsafe fn exec_buffer_entry() -> fn() -> u32 {
 pub unsafe fn jump_to_sram(func: fn() -> u32) -> u32 {
     func()
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline fence barriers (doc ch.4 Gap #4)
+// ---------------------------------------------------------------------------
+
+/// Flush the instruction cache / pipeline so recently-written SRAM code
+/// is visible to the instruction fetch unit.
+///
+/// On ARM Cortex-M this is DSB + ISB (data synchronization barrier then
+/// instruction synchronization barrier).  On RISC-V this is `fence.i`
+/// (instruction-fetch fence).
+///
+/// Must be called after writing machine code into [`EXEC_BUFFER`] and
+/// before jumping to it.
+///
+/// # Safety
+/// Caller must ensure no data writes to EXEC_BUFFER are still in flight.
+#[inline(always)]
+pub unsafe fn flush_instruction_cache() {
+    #[cfg(target_arch = "arm")]
+    unsafe {
+        core::arch::asm!("dsb", "isb", options(nostack));
+    }
+
+    #[cfg(target_arch = "riscv32")]
+    unsafe {
+        core::arch::asm!("fence.i", options(nostack));
+    }
+}
+
+/// Execute machine code from [`EXEC_BUFFER`] at the given byte offset.
+///
+/// Flushes the instruction pipeline, then transmutes the buffer pointer
+/// into a callable function and invokes it.
+///
+/// # Safety
+/// - `offset` must be within [`EXEC_BUFFER_SIZE`].
+/// - The buffer must contain valid, architecture-correct machine code at
+///   `offset`.
+/// - Calling this with garbage code = guaranteed Ring 0 fault.
+pub unsafe fn execute_sram_buffer(offset: usize) -> u32 {
+    flush_instruction_cache();
+
+    let base = core::ptr::addr_of!(EXEC_BUFFER) as *const u8 as usize + offset;
+
+    #[cfg(target_arch = "arm")]
+    // SAFETY: SRAM addresses are halfword-aligned; setting bit 0 tags
+    // Thumb instruction-set state without corrupting the address.
+    let func_ptr: extern "C" fn() -> u32 =
+        core::mem::transmute((base | 1) as *const ());
+
+    #[cfg(target_arch = "riscv32")]
+    let func_ptr: extern "C" fn() -> u32 =
+        core::mem::transmute(base as *const ());
+
+    func_ptr()
+}

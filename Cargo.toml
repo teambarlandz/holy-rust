@@ -13,6 +13,9 @@ std = []
 embedded-hal = "1.0"
 
 [profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
+opt-level = "z"         # Optimize aggressively for binary size
+lto = true              # Link-Time Optimization (cross-crate dead code elimination)
+codegen-units = 1       # Single thread for maximum LTO optimization
+panic = "abort"         # Strip unwind tables
+strip = true            # Strip all symbols from final release binary
+debug = false           # No debug info
