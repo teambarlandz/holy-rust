@@ -4,11 +4,14 @@ A single-address-space, Ring-0 bare-metal interactive operating environment and
 single-pass streaming JIT compiler for ARM Cortex-M and RISC-V microcontrollers.
 
 ```
- _   _  ____ _  _ _   ___  _   _ _____   _____ _____ 
-| \ | |/ __ \ || | | | | \ | | \ | |  __ \ / ____|  _ \
-|  \| | (__| __ |_| | |  .` | |  | | |  | | (___ | |_) |
-| . ` |\___ |__||__ |_| |\___|_|  |_|_|  |_|\___| |_| 
-|_|\_\|___/     |_|   |_|                                   
+  _   _ ol_         ____ust
+ | | | | ___ | |_   |  _ \ _   _ ___| |_ 
+ | |_| |/ _ \| | | | | |_) | | | / __| __|
+ |  _  | (_) | | |_| |  _ <| |_| \__ \ |_ 
+ |_| |_|\___/|_|\__, |_| \_\\__,_|___/\__|
+                |___/                     
+      The Bare-Metal Interactive OS
+      
 ```
 
 ## Project Vision

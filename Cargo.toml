@@ -1,0 +1,18 @@
+[package]
+name = "holy-rust"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+# Enables host-side unit testing of pure-logic modules (lexer/parser/emitters).
+std = []
+
+[dependencies]
+# Embedded HAL traits (portable GPIO interfaces)
+embedded-hal = "1.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

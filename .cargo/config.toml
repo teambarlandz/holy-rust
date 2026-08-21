@@ -1,0 +1,14 @@
+# Holy Rust cargo configuration.
+#
+# Runners assume QEMU is installed on the host. `cargo run` appends the ELF
+# path to the runner command automatically.
+
+[build]
+# Default target: ARM Cortex-M4F. Override with --target for RISC-V builds.
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+runner = "qemu-system-arm -M netduinoplus2 -cpu cortex-m4 -nographic -kernel"
+
+[target.riscv32imac-unknown-none-elf]
+runner = "qemu-system-riscv32 -machine sifive_e -nographic -bios none -kernel"

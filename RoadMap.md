@@ -1,8 +1,47 @@
 # RoadMap.md: Holy Rust Implementation Plan
 
+**Project Directory:**
+
+holy-rust/
+├── .cargo/
+│   └── config.toml             # Custom target runners (QEMU & probe-rs)
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # Automated build, lint, and QEMU test workflow
+├── docs/                       # Architectural documentation suite (Chapters 1-6)
+├── memory.x                    # Linker script for Flash/SRAM bounds
+├── Cargo.toml                  # Workspace manifest (#![no_std], PACs, HALs)
+├── build.rs                    # Linker script validation & SRAM section layout
+└── src/
+├── main.rs                 # Kernel entry point & Ring 0 boot sequence
+├── lib.rs                  # Core library exports
+├── capabilities/           # O(1) Linear Capability Token Engine
+│   ├── mod.rs              # Capability module exports
+│   ├── registry.rs         # SRAM bitfield token state tracking
+│   └── tokens.rs           # Non-copyable Cap<T> abstractions & PAC wrappers
+├── compiler/               # Single-Pass Streaming JIT Engine
+│   ├── mod.rs              # Compiler exports
+│   ├── lexer.rs            # Zero-allocation streaming ASCII lexer
+│   ├── parser.rs           # Single-pass grammar evaluator
+│   ├── primitives.rs       # Threaded micro-primitive execution dispatch table
+│   └── emitter.rs          # Thumb-2 (ARM) & RV32I (RISC-V) instruction emitters
+├── kernel/                 # Ring 0 Core Infrastructure
+│   ├── mod.rs              # Kernel subsystem exports
+│   ├── exec.rs             # Executable SRAM buffer execution & pointer casting
+│   ├── interrupt.rs        # Dynamic Vector Table relocation & C-ABI thunks
+│   └── memory.rs           # Direct memory allocation & volatile access (peek/poke)
+└── drivers/                # Hardware Abstraction Layer & REPL Interfaces
+├── mod.rs              # Driver exports
+├── uart.rs             # Bare-metal non-blocking UART driver (Ring Buffer)
+└── repl.rs             # ASCII terminal REPL state machine & command handler
+
+
+---
+
 ## Milestone 1: Scaffold & Toolchain Setup
 
 **Objective:** Establish the foundational repository structure, toolchain configurations, and target definitions required to build and run Holy Rust on both QEMU emulators and physical hardware.
+
 
 **Tasks:**
 - Create `.cargo/config.toml` with custom target runners for QEMU (ARM Cortex-M and RISC-V) and probe-rs for flashing
@@ -161,3 +200,11 @@
 - Capability enforcement prevents double-allocation of same peripheral in single REPL session
 - Panic handler routes through UART (no bare-metal crashes lose debug output)
 - All code compiles for both `thumbv7em-none-eabihf` and `riscv32imac-unknown-none-elf` targets
+
+
+## CODE GENERATION RULES & QUALITY STANDARDS
+
+1. **Zero Placeholder Code:** Do NOT use `// TODO`, `todo!()`, `unimplemented!()`, or truncated code snippets. Every function, struct, and driver implementation must be fully written and ready to compile.
+2. **Strict `unsafe` Documentation:** Every `unsafe` block must include a `// SAFETY:` explanatory comment detailing hardware register alignment, volatile memory access semantics, and execution safety.
+3. **Zero Dynamic Allocation (`no_alloc`):** Do not use `alloc` or dynamic heap allocation. All ring buffers, capability registries, and execution buffers must reside in static memory or stack frames.
+4. **Complete Module Coverage:** Generate full implementations for all modules listed in the repository tree.
