@@ -385,3 +385,64 @@ QEMU smoke tests pass on both targets: banner, arithmetic, let/fn/call,
 poke/peek roundtrip, reg_set_bit/clr_bit, cap_claim→BUSY→cap_drop,
 div-by-zero and unknown-symbol errors, help, graceful fault on wild access.
 
+## 13. Native codegen — milestone 4
+
+### 13.1 What it is
+
+Instead of walking the threaded word-stream at runtime (a function-pointer
+chase per token), `compile_and_run()` scans the stream once, emits matching
+native instructions into a static EXEC_BUFFER (in SRAM_code/ITIM), then
+jumps into it.  The first call pays the scan + emit cost; once compiled the
+code runs at full CPU speed with no dispatch overhead.
+
+### 13.2 Two-register compiler
+
+Only streams matching `lit [op lit]* [load|store] halt` are compilable;
+everything else returns `Err(())` and falls back to the threaded path.
+
+| Role   | ARM   | RISC-V |
+|--------|-------|--------|
+| ACC    | r0    | a0 (x10) |
+| SCRATCH| r1    | a1 (x11) |
+
+Pattern rules:
+- `lit N` → immediate-load into ACC (ARM: `MOVW`; RV32I: `LUI`+`ADDI`).
+- Binary op (`+−×÷`) → second `lit` into SCRATCH, then op ACC,SCRATCH → ACC.
+- `load_reg` → load from `ACC`-pointed address into ACC.
+- `write_reg` → store SCRATCH to `ACC`-pointed address.
+- `halt` → return to the caller (ARM: `BX LR`; RV32I: `JALR x0,0(ra)`).
+
+For simple binary chains (`2+3;`), the first `lit` goes into ACC, the second
+into SCRATCH, and the op merges them.  For chains of three or more terms, the
+accumulator naturally propagates and SCRATCH gets the next immediate each time.
+
+### 13.3 StreamProgram.run() — native-first, threaded fallback
+
+`run()` (in `stream.rs`) first calls `compile_and_run()`.  If it returns
+`Err(())` (too complex, or not yet supported), it falls back to
+`run_threaded_stream()`.  This means any expression that previously worked
+continues to work — native is a transparent accelerator, not a replacement.
+
+### 13.4 RISC-V limitation
+
+LLD emits the `.sram_code` section (ITIM @ 0x08000000) into a RW-only
+PT_LOAD segment (the Rust `static mut` data has no X flag).  QEMU's
+sifive_e enforces execute-permission on PT_LOAD segments, so native code
+faults with an instruction access error.  A `#[cfg(target_arch = "riscv32")]`
+early-return in `compile_and_run()` forces the threaded fallback on RISC-V.
+
+Potential fixes (not yet implemented):
+1. GNU ld + `--nmagic` (may not create PT_LOAD at all).
+2. Post-link `llvm-objcopy --set-section-flags .sram_code=code,data,load,alloc`
+   to flip the segment flags.
+3. PHDRS in the linker script (tried, but breaks `.data AT > flash` layout).
+
+On real SiFive E310 hardware the ITIM is always executable — this is a
+QEMU-specific issue.
+
+### 13.5 What compiles natively today
+
+- Simple arithmetic: `2+3;`, `7 8 *;`, `100 5 /;`
+- Chained arithmetic: `x * x;`, `let x = 99; x * 2;`
+- Poke/peek roundtrip: `poke ADDR VAL; peek ADDR;`
+

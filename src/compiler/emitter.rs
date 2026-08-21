@@ -33,6 +33,12 @@ pub trait TargetEmitter {
     fn emit_add(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError>;
     /// `dst = a - b`.
     fn emit_sub(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError>;
+    /// `dst = a * b`.
+    fn emit_mul(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError>;
+    /// `dst = a / b` (signed, truncating toward zero; div-by-zero returns 0).
+    fn emit_div(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError>;
+    /// Load `imm` into the return register and return to caller.
+    fn emit_mov_ret(&mut self, imm: u32) -> Result<(), EmitError>;
     /// Return to caller.
     fn emit_ret(&mut self) -> Result<(), EmitError>;
     /// Bytes emitted so far.
@@ -142,6 +148,23 @@ pub fn encode_rtype_addsub(rd: u8, rs1: u8, rs2: u8, sub: bool) -> u32 {
 #[allow(dead_code)]
 pub const RV32_RET: u32 = 0x0000_8067;
 
+/// Encode Thumb-2 SDIV Rd, Rn, Rm as two halfwords (hw1, hw2).
+fn encode_sdiv(rd: u8, rn: u8, rm: u8) -> (u16, u16) {
+    // Encoding T1: 1111_1011_1011_Rn  1111_Rd_0001_Rm
+    let hw1 = 0xFB90 | (rn as u16);
+    let hw2 = 0xF010 | ((rd as u16) << 8) | (rm as u16);
+    (hw1, hw2)
+}
+
+/// Encode RV32I R-type with custom funct7/funct3.
+fn encode_rtype(rd: u8, rs1: u8, rs2: u8, funct7: u32, funct3: u32) -> u32 {
+    0x33 | (funct7 << 25)
+        | ((rs2 as u32 & 0x1F) << 20)
+        | ((rs1 as u32 & 0x1F) << 15)
+        | (funct3 << 12)
+        | ((rd as u32 & 0x1F) << 7)
+}
+
 // ---------------------------------------------------------------------------
 // Thumb-2 backend
 // ---------------------------------------------------------------------------
@@ -234,6 +257,36 @@ impl TargetEmitter for Thumb2Emitter {
         self.push16(0x1A00 | ((b as u16) << 6) | ((a as u16) << 3) | dst as u16)
     }
 
+    fn emit_mul(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError> {
+        if dst > 7 || a > 7 || b > 7 {
+            return Err(EmitError::BadRegister);
+        }
+        // MULS Rdm, Rn, Rm — Rdm must equal Rn; result is in Rdm.
+        // Move a into dst first if needed, then multiply.
+        if a != dst {
+            // MOVS Rd, Rn (register-register)
+            self.push16(((a as u16) << 3) | dst as u16)?;
+        }
+        // MULS Rdm, Rm → 0x4340 | (Rm << 3) | Rdm
+        self.push16(0x4340 | ((b as u16) << 3) | (dst as u16))
+    }
+
+    fn emit_div(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError> {
+        if dst > 15 || a > 15 || b > 15 {
+            return Err(EmitError::BadRegister);
+        }
+        // SDIV Rd, Rn, Rm — 32-bit Thumb-2 instruction.
+        let (hw1, hw2) = encode_sdiv(dst, a, b);
+        self.push16(hw1)?;
+        self.push16(hw2)
+    }
+
+    fn emit_mov_ret(&mut self, imm: u32) -> Result<(), EmitError> {
+        // Load into r0 (return register) then BX LR.
+        self.emit_mov_imm(0, imm)?;
+        self.emit_ret()
+    }
+
     fn emit_ret(&mut self) -> Result<(), EmitError> {
         // BX LR
         self.push16(0x4770)
@@ -320,6 +373,22 @@ impl TargetEmitter for Riscv32Emitter {
 
     fn emit_sub(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError> {
         self.push32(encode_rtype_addsub(dst, a, b, true))
+    }
+
+    fn emit_mul(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError> {
+        // MUL rd, rs1, rs2 — funct7=0x01, funct3=0x00
+        self.push32(encode_rtype(dst, a, b, 0x01, 0x00))
+    }
+
+    fn emit_div(&mut self, dst: u8, a: u8, b: u8) -> Result<(), EmitError> {
+        // DIV rd, rs1, rs2 — funct7=0x01, funct3=0x04 (signed, trunc toward zero)
+        self.push32(encode_rtype(dst, a, b, 0x01, 0x04))
+    }
+
+    fn emit_mov_ret(&mut self, imm: u32) -> Result<(), EmitError> {
+        // Load into a0 (x10, return register) then JALR x0, ra, 0.
+        self.emit_mov_imm(10, imm)?; // a0 = x10
+        self.emit_ret()
     }
 
     fn emit_ret(&mut self) -> Result<(), EmitError> {

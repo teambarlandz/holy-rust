@@ -36,7 +36,10 @@ SECTIONS
         KEEP(*(.capability_registry))
     } > registry
 
-    /* JIT execution buffer (writable + executable, ITIM). */
+    /* JIT execution buffer (writable + executable, ITIM).
+     * NOLOAD keeps the section out of the ELF file; build.rs runs
+     * objcopy to grant the PT_LOAD segment covering this address range
+     * execute permission (LLD infers RW from the input sections). */
     .sram_code (NOLOAD) : ALIGN(4)
     {
         KEEP(*(.sram_code))

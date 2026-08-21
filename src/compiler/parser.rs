@@ -86,12 +86,21 @@ pub struct StreamProgram {
 impl StreamProgram {
     /// Execute against the kernel's threaded dispatch engine.
     ///
-    /// Returns the top operand-stack value when the program produces one
-    /// (`peek` / expression statements).
+    /// Tries the native codegen path first (Milestone 4) — compiles the
+    /// threaded stream into real machine code and executes via
+    /// `exec_buffer_entry`. Falls back to the threaded interpreter for
+    /// streams that exceed the two-register compiler's capacity.
     pub fn run(&self) -> Option<u32> {
         unsafe {
             crate::kernel::exec::vm_reset();
             if self.len > 0 {
+                // Try native path first.
+                if let Ok(result) = crate::compiler::native::compile_and_run(
+                    &self.words, self.len, self.yields_value,
+                ) {
+                    return result;
+                }
+                // Fall back to threaded interpreter.
                 crate::kernel::exec::run_threaded_stream(self.words.as_ptr());
             }
             if self.yields_value {
