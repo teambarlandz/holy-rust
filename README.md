@@ -1,42 +1,110 @@
 # HOLY RUST
 
-A single-address-space, Ring-0 operating environment and interactive streaming JIT compiler.
-Provides instant bare-metal execution and interactive hardware control backed by O(1)
-linear capability safety proofs.
+A single-address-space, Ring-0 bare-metal interactive operating environment and
+single-pass streaming JIT compiler for ARM Cortex-M and RISC-V microcontrollers.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub repo](https://img.shields.io/badge/GitHub-Repository-blue.svg)](https://github.com/holy-rust/holy-rust)
-
-## Overview
-
-Holy Rust eliminates the traditional OS boundary between user space and kernel space.
-All code—the live REPL, capability verifier, streaming JIT compiler, and user scripts—
-executes exclusively within Ring 0 with verified safety guarantees.
-
-- **Single-Address-Space Architecture**: Unified physical memory space, no MMU translation
-- **Zero-Syscall Execution**: Direct hardware access via inlined function calls
-- **Linear Capability Model**: O(1) compile-time safety via non-copyable tokens
-- **Streaming Single-Pass Compilation**: Tokenize and emit in one pass, no AST/MIR
-
-## Quick Start
-
-```bash
-# Build Holy Rust for your target
-cargo build --target <your-target>
-
-# Launch the bare-metal REPL
-cargo run -- REPL
+```
+ _   _  ____ _  _ _   ___  _   _ _____   _____ _____ 
+| \ | |/ __ \ || | | | | \ | | \ | |  __ \ / ____|  _ \
+|  \| | (__| __ |_| | |  .` | |  | | |  | | (___ | |_) |
+| . ` |\___ |__||__ |_| |\___|_|  |_|_|  |_|\___| |_| 
+|_|\_\|___/     |_|   |_|                                   
 ```
 
-## Documentation
+## Project Vision
 
-- [CHAPTER_01: MANIFESTO](docs/CHAPTER_01_MANIFESTO.md) - Core vision and design principles
-- [CHAPTER_02: CAPABILITY ENGINE](docs/CHAPTER_02_CAPABILITY_ENGINE.md) - Linear capabilities & hardware tokens
-- [CHAPTER_03: STREAMING JIT](docs/CHAPTER_03_STREAMING_JIT.md) - Single-pass syntax streaming JIT
-- [CHAPTER_04: RING 0 KERNEL](docs/CHAPTER_04_RING0_KERNEL.md) - Ring 0 execution model
-- [CHAPTER_05: BARE-METAL REPL](docs/CHAPTER_05_BARE_METAL_REPL.md) - Interactive Shell architecture
-- [CHAPTER_06: HAL & INTEGRATION](docs/CHAPTER_06_HAL_AND_INTEGRATION.md) - HAL and porting guide
+Holy Rust synthesizes the immediacy of 1980s personal computing—typing code directly
+into an interactive shell that executes immediately on raw hardware—with the mathematical
+rigor of modern systems engineering. All code executes in CPU Ring 0 with verified safety
+guarantees, eliminating the traditional user/kernel boundary and enabling microsecond-accurate
+real-time execution.
 
----
+## Architecture Diagram
 
-The Bare-Metal Interactive OS
+```text
+                          HOST PC ENVIRONMENT
+                               │
+                               │ compile once with cargo/rustc
+                               ▼
++─────────────────────────────────────────────────────────────────+
+│                  HOST-SIDE BUILD ENVIRONMENT                  │
+│  cargo build --target <target>                                │
+│  rustc --emit=llvm-ir ...                                     │
+│  probe-rs target flash                                        │
++───────────────────────┬─────────────────────────────────────────+
+                       │
+                       │ hex image / binary
+                       ▼
++─────────────────────────────────────────────────────────────────+
+│                    TARGET SILICON (Ring 0)                    │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  SRAM: Capability Registry + JIT Execution Buffers      │   │
+│  │  • Cap<T> tokens (O(1) bitmask verification)           │   │
+│  │  • Threaded micro-primitive dispatch array              │   │
+│  │  • Symbol/Execution hash table                        │   │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  Flash: Permanent micro-primitives (.rodata)            │   │
+│  │  • load_reg_prim, write_reg_prim, etc.                │   │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  Peripherals: MMIO registers accessed via Cap<T>      │   │
+│  │  • GPIO, UART, SPI, I2C, PWM, Timers                   │   │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  Vector Table: Relocatable to SRAM (<12 cycle dispatch)│   │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  CPU: ARM Cortex-M or RISC-V, executing in Ring 0      │   │
+│  +─────────────────────────────────────────────────────────+   │
+│  │  Input: UART/USB CDC REPL stream                       │   │
+│  │  Output: Direct console write to UART/USB              │   │
+│  +─────────────────────────────────────────────────────────+   │
++─────────────────────────────────────────────────────────────────+
+```
+
+## Documentation Index
+
+- [CHAPTER_01: MANIFESTO](docs/CHAPTER_01_MANIFESTO.md) - Philosophical and system foundation
+- [CHAPTER_02: CAPABILITY ENGINE](docs/CHAPTER_02_CAPABILITY_ENGINE.md) - The safety model
+- [CHAPTER_03: STREAMING JIT](docs/CHAPTER_03_STREAMING_JIT.md) - Compiler architecture
+- [CHAPTER_04: RING 0 KERNEL](docs/CHAPTER_04_RING0_KERNEL.md) - Kernel internals
+- [CHAPTER_05: BARE-METAL REPL](docs/CHAPTER_05_BARE_METAL_REPL.md) - Interactive shell and HAL
+- [SYSTEM_BOUNDARIES_AND_ECOSYSTEM.md] - Domain separation and compilation model
+
+## Quick-Start Guide
+
+### Prerequisites
+
+```bash
+# Host toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+cargo install probe-rs  # or openocd
+pip install picocom       # or minicom
+
+# Target build (example for RISC-V)
+cargo build --target riscv32imac-unknown-none-elf
+
+# Flash to target
+probe-rs target flash --chip rp2040
+
+# Launch REPL (UART at 115200 baud)
+picocom -b 115200 /dev/ttyACM0
+```
+
+### First Boot
+
+1. Power on target hardware - CPU initializes vector table, clocks, SRAM
+2. Holy Rust core engine loads - initializes SRAM Capability Registry
+3. REPL/stream interface attaches - listens on UART/USB for source
+4. Streaming single-pass verification - text tokenized, O(1) capabilities checked
+5. Direct Ring 0 execution - CPU jumps to SRAM buffer, executes at hardware speed
+
+### Example: GPIO Toggle via REPL
+
+```rust
+// Claim capability token for GPIO Port A
+let mut gpio_a = cap_claim::<GPIOA>().expect("GPIOA already in use");
+
+// Direct memory-mapped register write
+poke(0x4002_0000 as *mut u32, 0x0000_0001);
+
+// Inline toggle using capability token
+gpio_a.pin(0).set_high();
+```
