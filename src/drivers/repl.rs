@@ -160,9 +160,7 @@ fn error_text(err: crate::compiler::parser::ParseError) -> &'static [u8] {
         DivByZero => b"DIV BY ZERO\n",
         MissingSemicolon => b"MISSING SEMICOLON\n",
         EmptyLine => b"\n",
-        CapabilityViolation => {
-            b"E001: CAPABILITY_VIOLATION - Peripheral token not claimed\n"
-        }
+        CapabilityViolation => b"E001: CAPABILITY_VIOLATION - Peripheral token not claimed\n",
     }
 }
 
@@ -190,33 +188,26 @@ fn execute(outcome: Outcome) {
         },
         Outcome::Claim(name) => do_claim(&name),
         Outcome::Drop(name) => do_drop(&name),
-        Outcome::EnforcedPoke { addr, val } => {
-            match memory::enforced_poke_u32(addr, val) {
-                Ok(()) => uart::write_line(b"OK"),
-                Err(e) => {
-                    uart::write_str(e.as_bytes());
-                    uart::write_str(b"\n");
-                }
+        Outcome::EnforcedPoke { addr, val } => match memory::enforced_poke_u32(addr, val) {
+            Ok(()) => uart::write_line(b"OK"),
+            Err(e) => {
+                uart::write_str(e.as_bytes());
+                uart::write_str(b"\n");
             }
-        }
-        Outcome::EnforcedPeek { addr } => {
-            match memory::enforced_peek_u32(addr) {
-                Ok(value) => {
-                    uart::write_str(b"= ");
-                    write_value(value);
-                }
-                Err(e) => {
-                    uart::write_str(e.as_bytes());
-                    uart::write_str(b"\n");
-                }
+        },
+        Outcome::EnforcedPeek { addr } => match memory::enforced_peek_u32(addr) {
+            Ok(value) => {
+                uart::write_str(b"= ");
+                write_value(value);
             }
-        }
+            Err(e) => {
+                uart::write_str(e.as_bytes());
+                uart::write_str(b"\n");
+            }
+        },
         Outcome::SetBit { addr, bit } => {
             // Capability enforcement for reg_set_bit (doc ch.2).
-            match memory::enforced_poke_u32(
-                addr,
-                memory::peek_u32(addr as usize) | (1u32 << bit),
-            ) {
+            match memory::enforced_poke_u32(addr, memory::peek_u32(addr as usize) | (1u32 << bit)) {
                 Ok(()) => uart::write_line(b"OK"),
                 Err(e) => {
                     uart::write_str(e.as_bytes());
@@ -226,10 +217,8 @@ fn execute(outcome: Outcome) {
         }
         Outcome::ClrBit { addr, bit } => {
             // Capability enforcement for reg_clr_bit (doc ch.2).
-            match memory::enforced_poke_u32(
-                addr,
-                memory::peek_u32(addr as usize) & !(1u32 << bit),
-            ) {
+            match memory::enforced_poke_u32(addr, memory::peek_u32(addr as usize) & !(1u32 << bit))
+            {
                 Ok(()) => uart::write_line(b"OK"),
                 Err(e) => {
                     uart::write_str(e.as_bytes());

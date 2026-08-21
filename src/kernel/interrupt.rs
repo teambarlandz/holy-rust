@@ -136,9 +136,13 @@ pub unsafe fn attach_jit_irq(irq_index: usize, jit_fn: extern "C" fn()) {
 unsafe extern "C" fn default_reset() -> ! {
     loop {
         #[cfg(target_arch = "arm")]
-        unsafe { core::arch::asm!("wfi") }
+        unsafe {
+            core::arch::asm!("wfi")
+        }
         #[cfg(target_arch = "riscv32")]
-        unsafe { core::arch::asm!("wfi") }
+        unsafe {
+            core::arch::asm!("wfi")
+        }
     }
 }
 
@@ -146,9 +150,13 @@ unsafe extern "C" fn default_reset() -> ! {
 unsafe extern "C" fn default_handler() {
     loop {
         #[cfg(target_arch = "arm")]
-        unsafe { core::arch::asm!("wfi") }
+        unsafe {
+            core::arch::asm!("wfi")
+        }
         #[cfg(target_arch = "riscv32")]
-        unsafe { core::arch::asm!("wfi") }
+        unsafe {
+            core::arch::asm!("wfi")
+        }
     }
 }
 

@@ -194,12 +194,10 @@ pub unsafe fn execute_sram_buffer(offset: usize) -> u32 {
     #[cfg(target_arch = "arm")]
     // SAFETY: SRAM addresses are halfword-aligned; setting bit 0 tags
     // Thumb instruction-set state without corrupting the address.
-    let func_ptr: extern "C" fn() -> u32 =
-        core::mem::transmute((base | 1) as *const ());
+    let func_ptr: extern "C" fn() -> u32 = core::mem::transmute((base | 1) as *const ());
 
     #[cfg(target_arch = "riscv32")]
-    let func_ptr: extern "C" fn() -> u32 =
-        core::mem::transmute(base as *const ());
+    let func_ptr: extern "C" fn() -> u32 = core::mem::transmute(base as *const ());
 
     func_ptr()
 }

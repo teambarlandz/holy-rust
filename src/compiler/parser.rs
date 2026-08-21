@@ -98,7 +98,9 @@ impl StreamProgram {
             if self.len > 0 {
                 // Try native path first.
                 if let Ok(result) = crate::compiler::native::compile_and_run(
-                    &self.words, self.len, self.yields_value,
+                    &self.words,
+                    self.len,
+                    self.yields_value,
                 ) {
                     return result;
                 }
