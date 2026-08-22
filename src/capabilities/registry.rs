@@ -89,18 +89,30 @@ fn riscv_addr_to_cap(addr: u32) -> Option<CapId> {
 /// unrestricted (SRAM / flash / unmapped). Returns `Ok(())` if access
 /// is permitted, `Err(cap_id)` if the peripheral is not claimed.
 ///
-/// SuperUser bypass is handled by the caller (check SuperUser bit first).
+/// SuperUser bypass is evaluated first. Fail-closed boundaries reject unmapped MMIO.
 #[inline(always)]
 pub fn check_access(addr: u32) -> Result<(), CapId> {
+    if is_superuser_active() {
+        return Ok(());
+    }
+
     if let Some(cap_id) = addr_to_cap_id(addr) {
-        // SRAM regions return None (unmapped); only peripheral addresses
-        // reach this branch.
         if !is_claimed(cap_id as usize) {
             return Err(cap_id);
         }
+        Ok(())
+    } else {
+        #[cfg(target_arch = "arm")]
+        let is_ram_flash = matches!(addr, 0x0800_0000..=0x080F_FFFF | 0x2000_0000..=0x2001_C000);
+        #[cfg(target_arch = "riscv32")]
+        let is_ram_flash = matches!(addr, 0x2000_0000..=0x2000_FFFF | 0x8000_0000..=0x8000_FFFF);
+
+        if is_ram_flash {
+            Ok(())
+        } else {
+            Err(CapId::SuperUser)
+        }
     }
-    // None → unmapped/SRAM → unrestricted access.
-    Ok(())
 }
 
 /// Returns true when the SuperUser capability is currently claimed.

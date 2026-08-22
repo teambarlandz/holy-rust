@@ -296,7 +296,7 @@ impl Compiler {
         match cur.next() {
             Token::Identifier(id) => match id {
                 b"poke" => {
-                    let addr = self.eval_expr(None, cur)?;
+                    let addr = self.parse_atomic_term(cur)?;
                     let val = self.eval_expr(None, cur)?;
                     self.expect_semicolon(cur)?;
                     // Definition-time capability enforcement (doc ch.2 Q3).
@@ -308,7 +308,7 @@ impl Compiler {
                     Ok(())
                 }
                 b"peek" => {
-                    let addr = self.eval_expr(None, cur)?;
+                    let addr = self.parse_atomic_term(cur)?;
                     self.expect_semicolon(cur)?;
                     // Definition-time capability enforcement (doc ch.2 Q3).
                     crate::capabilities::registry::check_access(addr)
@@ -344,7 +344,7 @@ impl Compiler {
     fn parse_command(&mut self, id: &[u8], cur: &mut Cur) -> Result<Outcome, ParseError> {
         match id {
             b"peek" => {
-                let addr = self.eval_expr(None, cur)?;
+                let addr = self.parse_atomic_term(cur)?;
                 self.expect_semicolon(cur)?;
                 // Mandatory capability enforcement (doc ch.2).
                 crate::capabilities::registry::check_access(addr)
@@ -352,7 +352,7 @@ impl Compiler {
                 Ok(Outcome::EnforcedPeek { addr })
             }
             b"poke" => {
-                let addr = self.eval_expr(None, cur)?;
+                let addr = self.parse_atomic_term(cur)?;
                 let val = self.eval_expr(None, cur)?;
                 self.expect_semicolon(cur)?;
                 // Mandatory capability enforcement (doc ch.2).
@@ -371,8 +371,8 @@ impl Compiler {
                 Ok(Outcome::Drop(name))
             }
             b"reg_set_bit" => {
-                let addr = self.eval_expr(None, cur)?;
-                let bit = self.eval_expr(None, cur)?;
+                let addr = self.parse_atomic_term(cur)?;
+                let bit = self.parse_atomic_term(cur)?;
                 self.expect_semicolon(cur)?;
                 // Mandatory capability enforcement (doc ch.2).
                 crate::capabilities::registry::check_access(addr)
@@ -380,8 +380,8 @@ impl Compiler {
                 Ok(Outcome::SetBit { addr, bit })
             }
             b"reg_clr_bit" => {
-                let addr = self.eval_expr(None, cur)?;
-                let bit = self.eval_expr(None, cur)?;
+                let addr = self.parse_atomic_term(cur)?;
+                let bit = self.parse_atomic_term(cur)?;
                 self.expect_semicolon(cur)?;
                 // Mandatory capability enforcement (doc ch.2).
                 crate::capabilities::registry::check_access(addr)
@@ -422,6 +422,21 @@ impl Compiler {
 
     // -- expressions ---------------------------------------------------------
 
+    /// Parse a single atomic term or a parenthesized sub-expression without greedily consuming trailing operators.
+    fn parse_atomic_term(&self, cur: &mut Cur) -> Result<u32, ParseError> {
+        let tok = cur.next();
+        match tok {
+            Token::LParen => {
+                let val = self.eval_expr(None, cur)?;
+                match cur.next() {
+                    Token::RParen => Ok(val),
+                    _ => Err(ParseError::UnexpectedToken),
+                }
+            }
+            _ => self.resolve_term(tok, cur),
+        }
+    }
+
     /// Evaluate an expression left-to-right (no precedence).
     ///
     /// `first` carries an already-consumed leading token (None when the
@@ -431,13 +446,32 @@ impl Compiler {
             Some(t) => t,
             None => cur.next(),
         };
-        let mut acc = self.resolve_term(head, cur)?;
-        while let Token::Operator(op) = cur.peek() {
-            cur.next(); // consume operator
-            if !matches!(op, b'+' | b'-' | b'*' | b'/' | b'%') {
-                return Err(ParseError::UnsupportedOperator(op));
+        let mut acc = if head == Token::LParen {
+            let val = self.eval_expr(None, cur)?;
+            match cur.next() {
+                Token::RParen => val,
+                _ => return Err(ParseError::UnexpectedToken),
             }
-            let rhs = self.resolve_term(cur.next(), cur)?;
+        } else {
+            self.resolve_term(head, cur)?
+        };
+
+        while let Token::Operator(op) = cur.peek() {
+            if !matches!(op, b'+' | b'-' | b'*' | b'/' | b'%') {
+                break;
+            }
+            cur.next(); // consume operator
+            let rhs_tok = cur.next();
+            let rhs = if rhs_tok == Token::LParen {
+                let val = self.eval_expr(None, cur)?;
+                match cur.next() {
+                    Token::RParen => val,
+                    _ => return Err(ParseError::UnexpectedToken),
+                }
+            } else {
+                self.resolve_term(rhs_tok, cur)?
+            };
+
             acc = match op {
                 b'+' => acc.wrapping_add(rhs),
                 b'-' => acc.wrapping_sub(rhs),
@@ -471,7 +505,7 @@ impl Compiler {
             Token::Literal(v) => Ok(v),
             Token::Identifier(id) => {
                 if id == b"peek" {
-                    let addr = self.eval_expr(None, cur)?;
+                    let addr = self.parse_atomic_term(cur)?;
                     Ok(crate::kernel::memory::peek_u32(addr as usize))
                 } else {
                     self.lookup_symbol(id).ok_or(ParseError::UnknownSymbol)
@@ -524,14 +558,7 @@ impl Compiler {
     }
 
     fn find_fn(&self, name: &[u8]) -> Option<usize> {
-        (0..MAX_FNS).find(|&i| {
-            self.fn_body_lens[i] > 0
-                || i < MAX_FNS && {
-                    // Slot validity: names were written together with lens; treat
-                    // any slot whose name matches AND was allocated as live.
-                    self.fn_names[i].eq_bytes(name) && self.fn_allocated(i)
-                }
-        })
+        (0..MAX_FNS).find(|&i| self.fn_allocated(i) && self.fn_names[i].eq_bytes(name))
     }
 
     fn fn_allocated(&self, i: usize) -> bool {

@@ -33,6 +33,9 @@ static mut COMPILER: Compiler = Compiler::new();
 
 /// Run the REPL forever. This is the final boot destination.
 pub fn run() -> ! {
+    // Drain any leftover hardware UART buffer bytes prior to REPL startup
+    while uart::poll_get_byte().is_some() {}
+
     let mut state = State::Idle;
     // Outcome of the Evaluating phase, consumed by the Printing phase.
     let mut pending: Option<Result<Outcome, crate::compiler::parser::ParseError>> = None;
@@ -73,6 +76,7 @@ fn prompt() {
 
 /// Process one incoming byte (Reading state logic).
 fn feed(byte: u8) -> State {
+    let byte = if byte == b'\t' { b' ' } else { byte };
     match byte {
         b'\r' | b'\n' => {
             uart::write_str(b"\r\n");
