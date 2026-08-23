@@ -1,5 +1,9 @@
 # HOLY RUST
 
+> **v0.2.0** — native JIT on ARM + RISC-V, capability-gated PWM/SPI drivers,
+> program persistence store. See [UPGRADE.md](UPGRADE.md) for the full
+> REPL command reference and embedded-standard assessment.
+
 A single-address-space, Ring-0 bare-metal interactive operating environment and
 single-pass streaming JIT compiler for ARM Cortex-M and RISC-V microcontrollers.
 
