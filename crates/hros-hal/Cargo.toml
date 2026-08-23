@@ -1,0 +1,18 @@
+[package]
+name = "hros-hal"
+version = "0.1.0"
+edition = "2021"
+description = "HR-OS Mathematics-First HAL trait specs — zero-cost no_std"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "hros_hal"
+path = "src/lib.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

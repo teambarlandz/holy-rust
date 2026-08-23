@@ -4,3 +4,7 @@
 # Editor / OS noise
 *.swp
 .DS_Store
+
+# scratch/tmp
+tmp/
+crates/hros-hal/target/

@@ -14,6 +14,11 @@ use crate::compiler::primitives::MicroPrimitive;
 
 /// Size of the executable SRAM region reserved by `.sram_code` in the
 /// linker script.
+/// RISC-V DTIM shares 8K with data/bss/vectors/registry, so EXEC_BUFFER is
+/// 1K there; the ARM SRAM carve affords the full 4K.
+#[cfg(target_arch = "riscv32")]
+pub const EXEC_BUFFER_SIZE: usize = 1024;
+#[cfg(not(target_arch = "riscv32"))]
 pub const EXEC_BUFFER_SIZE: usize = 4096;
 
 /// Writable + executable JIT buffer placed at `__sram_code_base`
